@@ -20,18 +20,18 @@ const limiter = rateLimit({
 });
 
 const strictLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: { error: 'Too many write requests from this IP, please try again later.' },
+  windowMs: 60 * 1000,  // 1分钟（60000毫秒）
+  max: config.Limiter,  // 每分钟最多请求
   handler: (req, res) => {
     logWithCategory('warn', LOG_CATEGORIES.RATE_LIMIT, 'Strict rate limit exceeded', {
       ip: req.ip,
       userAgent: req.get('User-Agent'),
       endpoint: req.path
     });
-    res.status(429).json({ error: 'Too many write requests from this IP, please try again later.' });
+    res.status(429).json({ error: '请求过于频繁，请稍后再试。' });
   }
 });
+
 
 // 认证中间件
 const authenticateSetSecret = (req, res, next) => {

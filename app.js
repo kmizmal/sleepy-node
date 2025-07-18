@@ -87,13 +87,17 @@ app.use((err, req, res, next) => {
 });
 
 // 启动服务器
-app.listen(config.PORT, () => {
-  logWithCategory('info', LOG_CATEGORIES.SYSTEM, `Server started on port ${config.PORT}`, {
-    port: config.PORT,
-    setSecretConfigured: !!config.SET_SECRET,
-    getSecretConfigured: !!config.GET_SECRET,
-    logLevel: logger.level
-  });
+app.listen(config.PORT,config.HOST, () => {
+  logWithCategory(
+    'info',
+    LOG_CATEGORIES.SYSTEM,
+    `Server started on ${config.HOST}:${config.PORT}`,
+    {
+      setSecretConfigured: !!config.SET_SECRET,
+      getSecretConfigured: !!config.GET_SECRET,
+      logLevel: logger.level,
+    }
+  );  
   sendHeartbeat();
 });
 

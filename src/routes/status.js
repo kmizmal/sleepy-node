@@ -5,10 +5,23 @@ const { LOG_CATEGORIES } = require('../constants');
 const { authenticateSetSecret, strictLimiter } = require('../middleware');
 const { currentStatus, sendSSEMessage, sseClients } = require('../sse');
 
-// 获取当前时间 ISO 字符串（默认值）
 function getCurrentOrPassedTime(time) {
   return time !== undefined ? time : new Date().toISOString();
 }
+function updateDeviceStatus(deviceObj, time) {
+  for (const [deviceKey, deviceData] of Object.entries(deviceObj)) {
+    const existing = currentStatus.device[deviceKey] || {};
+    currentStatus.device[deviceKey] = {
+      ...existing,
+      ...deviceData,
+      time: getCurrentOrPassedTime(time),
+      show_name: deviceData.show_name || existing.show_name || deviceKey || 'Unknown'
+    };
+  }
+
+  currentStatus.last_updated = new Date().toISOString();
+}
+
 
 router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
   let { status, device, time, id, show_name, using, app_name } = req.body;
@@ -55,15 +68,7 @@ router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
   currentStatus.status = status;
 
   try {
-    for (const [deviceKey, deviceData] of Object.entries(device)) {
-      const existing = currentStatus.device[deviceKey] || {};
-      currentStatus.device[deviceKey] = {
-        ...existing,
-        ...deviceData,
-        time: getCurrentOrPassedTime(time),
-        show_name: deviceData.show_name || deviceKey || existing.show_name || 'Unknown'
-      };
-    }
+    updateDeviceStatus(device, time);
 
     currentStatus.last_updated = new Date().toISOString();
     sendSSEMessage(sseClients, 'update', currentStatus);
@@ -95,9 +100,40 @@ router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
 });
 
 
-// GET 获取/更新状态
 router.get('/', authenticateSetSecret, (req, res) => {
-  const { status, device, time } = req.query;
+  const { status, device, time, redirect_to_post } = req.query;
+
+  // 🔄 如果请求包含 redirect_to_post 参数，重定向到 POST 路由
+  if (redirect_to_post === 'true') {
+    logWithCategory('info', LOG_CATEGORIES.API, 'GET request redirecting to POST', {
+      ip: req.ip,
+      query: req.query
+    });
+
+    return res.status(307).json({
+      success: false,
+      code: 307,
+      message: '请使用 POST 方法进行状态更新',
+      redirect: {
+        method: 'POST',
+        url: req.originalUrl.split('?')[0], // 移除查询参数
+        body_format: {
+          status: 'number (0 or 1)',
+          device: 'object with device data',
+          time: 'ISO string (optional)'
+        }
+      }
+    });
+  }
+
+  const hasUpdateParams = status !== undefined || device !== undefined;
+  if (hasUpdateParams) {
+    logWithCategory('info', LOG_CATEGORIES.API, 'GET request with update parameters - suggesting POST', {
+      ip: req.ip,
+      hasStatus: status !== undefined,
+      hasDevice: device !== undefined
+    });
+  }
 
   let deviceObj = null;
   if (device !== undefined) {
@@ -109,7 +145,10 @@ router.get('/', authenticateSetSecret, (req, res) => {
         error: e.message,
         deviceParam: device
       });
-      return res.status(400).json({ error: 'Invalid device JSON format' });
+      return res.status(400).json({
+        error: 'Invalid device JSON format',
+        suggestion: 'Consider using POST method for complex device updates'
+      });
     }
   }
 
@@ -129,21 +168,40 @@ router.get('/', authenticateSetSecret, (req, res) => {
   }
 
   if (deviceObj) {
-    for (const [deviceKey, deviceData] of Object.entries(deviceObj)) {
-      const existing = currentStatus.device[deviceKey] || {};
-      currentStatus.device[deviceKey] = {
-        ...existing,
-        ...deviceData,
-        time: getCurrentOrPassedTime(time),
-        show_name: deviceData.show_name || deviceKey  || existing.show_name
-      };
-    }
+    updateDeviceStatus(deviceObj, time);
   }
 
   currentStatus.last_updated = new Date().toISOString();
   sendSSEMessage(sseClients, 'update', currentStatus);
 
-  res.json(currentStatus);
+  // 🔗 在响应中包含 POST 路由参考信息
+  const response = {
+    ...currentStatus,
+    _meta: {
+      last_updated: currentStatus.last_updated,
+      ...(hasUpdateParams && {
+        post_method_info: {
+          message: '对于复杂的状态更新，建议使用 POST 方法',
+          url: req.originalUrl.split('?')[0],
+          method: 'POST',
+          content_type: 'application/json',
+          example_body: {
+            status: 1,
+            device: {
+              "device_id": {
+                using: true,
+                app_name: "示例应用",
+                show_name: "设备显示名称"
+              }
+            },
+            time: new Date().toISOString()
+          }
+        }
+      })
+    }
+  };
+
+  res.json(response);
 });
 
 module.exports = router;
