@@ -33,7 +33,7 @@ router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
   const isLegacy = status === undefined && device === undefined && id && app_name && typeof using === 'boolean';
 
   if (isLegacy) {
-    status = using ? 1 : 0;
+    status = using ? 0 : 1; //  0 为或着，1 为似了
     device = {
       [id]: {
         using,
@@ -186,7 +186,7 @@ router.get('/', authenticateSetSecret, (req, res) => {
           method: 'POST',
           content_type: 'application/json',
           example_body: {
-            status: 1,
+            status: 0,
             device: {
               "device_id": {
                 using: true,
