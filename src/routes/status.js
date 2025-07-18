@@ -9,14 +9,31 @@ const { currentStatus, sendSSEMessage, sseClients } = require('../sse');
 function getCurrentOrPassedTime(time) {
   return time !== undefined ? time : new Date().toISOString();
 }
+
 router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
-  const { status, device, time } = req.body;
+  let { status, device, time, id, show_name, using, app_name } = req.body;
   const start = Date.now();
 
-  // 基础参数校验
+  const ip = req.ip;
+
+  // 🚧 如果是旧结构（没有 status 和 device，但有 id 等字段），进行转换
+  const isLegacy = status === undefined && device === undefined && id && app_name && typeof using === 'boolean';
+
+  if (isLegacy) {
+    status = using ? 1 : 0;
+    device = {
+      [id]: {
+        using,
+        app_name,
+        show_name: show_name || id
+      }
+    };
+  }
+
+  // 🚨 依然无效，返回错误
   if (typeof status !== 'number' || typeof device !== 'object' || !device) {
     logWithCategory('warn', LOG_CATEGORIES.API, '无效请求参数', {
-      ip: req.ip,
+      ip,
       body: req.body
     });
 
@@ -27,22 +44,19 @@ router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
     });
   }
 
-  // 日志记录（是否包含字段）
+  // ✅ 正常流程继续处理
   logWithCategory('info', LOG_CATEGORIES.API, 'Status update request', {
-    ip: req.ip,
+    ip,
     hasStatus: true,
     hasDevice: true,
     hasTime: !!time
   });
 
-  // 状态更新
   currentStatus.status = status;
 
-  // 更新设备信息
   try {
     for (const [deviceKey, deviceData] of Object.entries(device)) {
       const existing = currentStatus.device[deviceKey] || {};
-
       currentStatus.device[deviceKey] = {
         ...existing,
         ...deviceData,
@@ -61,21 +75,18 @@ router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
       duration: `${duration}ms`
     });
 
-    res.json({
+    return res.json({
       success: true,
       code: 200,
-      message: '状态更新成功',
-      data: {
-        deviceCount: Object.keys(currentStatus.device).length
-      }
+      message: '状态更新成功'
     });
   } catch (err) {
-    logWithCategory('error', LOG_CATEGORIES.API, '更新状态失败', {
+    logWithCategory('error', LOG_CATEGORIES.API, '状态更新失败', {
       error: err.message,
       stack: err.stack
     });
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       code: 500,
       message: '服务器内部错误'

@@ -4,7 +4,7 @@ EXPOSE 7860
 WORKDIR /app
 
 RUN npm install -g pnpm
-
+RUN apk add --no-cache git
 # COPY . .
 RUN git clone https://github.com/kmizmal/sleepy-node
 WORKDIR  /app/sleepy-node
