@@ -9,44 +9,80 @@ const { currentStatus, sendSSEMessage, sseClients } = require('../sse');
 function getCurrentOrPassedTime(time) {
   return time !== undefined ? time : new Date().toISOString();
 }
-
-// POST 更新状态
 router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
   const { status, device, time } = req.body;
+  const start = Date.now();
 
+  // 基础参数校验
+  if (typeof status !== 'number' || typeof device !== 'object' || !device) {
+    logWithCategory('warn', LOG_CATEGORIES.API, '无效请求参数', {
+      ip: req.ip,
+      body: req.body
+    });
+
+    return res.status(400).json({
+      success: false,
+      code: 400,
+      message: '请求参数不完整或格式错误'
+    });
+  }
+
+  // 日志记录（是否包含字段）
   logWithCategory('info', LOG_CATEGORIES.API, 'Status update request', {
     ip: req.ip,
-    hasStatus: status !== undefined,
-    hasDevice: !!device,
+    hasStatus: true,
+    hasDevice: true,
     hasTime: !!time
   });
 
-  if (status !== undefined) {
-    currentStatus.status = status;
-  }
+  // 状态更新
+  currentStatus.status = status;
 
-  if (device && typeof device === 'object') {
+  // 更新设备信息
+  try {
     for (const [deviceKey, deviceData] of Object.entries(device)) {
       const existing = currentStatus.device[deviceKey] || {};
+
       currentStatus.device[deviceKey] = {
         ...existing,
         ...deviceData,
         time: getCurrentOrPassedTime(time),
-        show_name: deviceData.show_name || deviceKey  || existing.show_name
+        show_name: deviceData.show_name || deviceKey || existing.show_name || 'Unknown'
       };
     }
+
+    currentStatus.last_updated = new Date().toISOString();
+    sendSSEMessage(sseClients, 'update', currentStatus);
+
+    const duration = Date.now() - start;
+    logWithCategory('info', LOG_CATEGORIES.API, 'Status updated successfully', {
+      newStatus: currentStatus.status,
+      deviceCount: Object.keys(currentStatus.device).length,
+      duration: `${duration}ms`
+    });
+
+    res.json({
+      success: true,
+      code: 200,
+      message: '状态更新成功',
+      data: {
+        deviceCount: Object.keys(currentStatus.device).length
+      }
+    });
+  } catch (err) {
+    logWithCategory('error', LOG_CATEGORIES.API, '更新状态失败', {
+      error: err.message,
+      stack: err.stack
+    });
+
+    res.status(500).json({
+      success: false,
+      code: 500,
+      message: '服务器内部错误'
+    });
   }
-
-  currentStatus.last_updated = new Date().toISOString();
-  sendSSEMessage(sseClients, 'update', currentStatus);
-
-  logWithCategory('info', LOG_CATEGORIES.API, 'Status updated successfully', {
-    newStatus: currentStatus.status,
-    deviceCount: Object.keys(currentStatus.device).length
-  });
-
-  res.json({ success: true, message: 'Status updated' });
 });
+
 
 // GET 获取/更新状态
 router.get('/', authenticateSetSecret, (req, res) => {
