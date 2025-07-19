@@ -53,8 +53,13 @@ app.use(cors({
 app.use('/api/', middleware.limiter);
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.redirect('https://github.com/kmizmal/sleepy-node');
+});
+
 // 路由注册
 app.use('/api/status', statusRouter);
+app.use('/device/set',statusRouter);// 兼容旧的 /device/set 路径
 app.use('/auth', authRouter);
 app.use('/events', eventsRouter);
 app.use('/health', healthRouter);
@@ -91,7 +96,7 @@ app.listen(config.PORT,config.HOST, () => {
   logWithCategory(
     'info',
     LOG_CATEGORIES.SYSTEM,
-    `Server started on ${config.HOST}:${config.PORT}`,
+    `Server started on http://${config.HOST}:${config.PORT}`,
     {
       setSecretConfigured: !!config.SET_SECRET,
       getSecretConfigured: !!config.GET_SECRET,
@@ -101,7 +106,6 @@ app.listen(config.PORT,config.HOST, () => {
   sendHeartbeat();
 });
 
-// 优雅关闭
 process.on('SIGTERM', () => {
   logWithCategory('info', LOG_CATEGORIES.SYSTEM, 'Graceful shutdown initiated');
   sseClients.forEach(client => {

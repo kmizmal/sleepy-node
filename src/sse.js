@@ -14,7 +14,7 @@ let currentStatus = {
     //   "time": "2025-07-17T10:00:00.000Z"
     // }
   },
-  last_updated: new Date().toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }),
+  last_updated: new Date().toISOString()
 };
 
 const sseClients = new Set();

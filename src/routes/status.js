@@ -5,9 +5,25 @@ const { LOG_CATEGORIES } = require('../constants');
 const { authenticateSetSecret, strictLimiter } = require('../middleware');
 const { currentStatus, sendSSEMessage, sseClients } = require('../sse');
 
+// ========= 工具函数 =========
 function getCurrentOrPassedTime(time) {
-  return time !== undefined ? time : new Date().toISOString();
+  const parsed = Date.parse(time);
+  return !isNaN(parsed) ? new Date(parsed).toISOString() : new Date().toISOString();
 }
+
+function parseDeviceParam(raw) {
+  if (typeof raw !== 'string') return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    try {
+      return JSON.parse(decodeURIComponent(raw));
+    } catch (err) {
+      return { _parseError: err.message };
+    }
+  }
+}
+
 function updateDeviceStatus(deviceObj, time) {
   for (const [deviceKey, deviceData] of Object.entries(deviceObj)) {
     const existing = currentStatus.device[deviceKey] || {};
@@ -18,22 +34,31 @@ function updateDeviceStatus(deviceObj, time) {
       show_name: deviceData.show_name || existing.show_name || deviceKey || 'Unknown'
     };
   }
-
-  currentStatus.last_updated = new Date().toISOString();
 }
 
+function applyStatusAndDeviceUpdate(status, deviceObj, time) {
+  if (typeof status === 'number') {
+    currentStatus.status = status;
+  }
+
+  if (deviceObj && typeof deviceObj === 'object') {
+    updateDeviceStatus(deviceObj, time);
+  }
+
+  currentStatus.last_updated = new Date().toISOString();
+  sendSSEMessage(sseClients, 'update', currentStatus);
+}
+
+// ========= POST 路由 =========
 
 router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
   let { status, device, time, id, show_name, using, app_name } = req.body;
   const start = Date.now();
-
   const ip = req.ip;
 
-  // 🚧 如果是旧结构（没有 status 和 device，但有 id 等字段），进行转换
   const isLegacy = status === undefined && device === undefined && id && app_name && typeof using === 'boolean';
-
   if (isLegacy) {
-    status = using ? 0 : 1; //  0 为或着，1 为似了
+    status = using ? 0 : 1;
     device = {
       [id]: {
         using,
@@ -43,7 +68,6 @@ router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
     };
   }
 
-  // 🚨 依然无效，返回错误
   if (typeof status !== 'number' || typeof device !== 'object' || !device) {
     logWithCategory('warn', LOG_CATEGORIES.API, '无效请求参数', {
       ip,
@@ -57,7 +81,6 @@ router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
     });
   }
 
-  // ✅ 正常流程继续处理
   logWithCategory('info', LOG_CATEGORIES.API, 'Status update request', {
     ip,
     hasStatus: true,
@@ -65,13 +88,8 @@ router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
     hasTime: !!time
   });
 
-  currentStatus.status = status;
-
   try {
-    updateDeviceStatus(device, time);
-
-    currentStatus.last_updated = new Date().toISOString();
-    sendSSEMessage(sseClients, 'update', currentStatus);
+    applyStatusAndDeviceUpdate(status, device, time);
 
     const duration = Date.now() - start;
     logWithCategory('info', LOG_CATEGORIES.API, 'Status updated successfully', {
@@ -99,11 +117,11 @@ router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
   }
 });
 
+// ========= GET 路由 =========
 
 router.get('/', authenticateSetSecret, (req, res) => {
   const { status, device, time, redirect_to_post } = req.query;
 
-  // 🔄 如果请求包含 redirect_to_post 参数，重定向到 POST 路由
   if (redirect_to_post === 'true') {
     logWithCategory('info', LOG_CATEGORIES.API, 'GET request redirecting to POST', {
       ip: req.ip,
@@ -116,7 +134,7 @@ router.get('/', authenticateSetSecret, (req, res) => {
       message: '请使用 POST 方法进行状态更新',
       redirect: {
         method: 'POST',
-        url: req.originalUrl.split('?')[0], // 移除查询参数
+        url: req.originalUrl.split('?')[0],
         body_format: {
           status: 'number (0 or 1)',
           device: 'object with device data',
@@ -137,19 +155,21 @@ router.get('/', authenticateSetSecret, (req, res) => {
 
   let deviceObj = null;
   if (device !== undefined) {
-    try {
-      const decodedDevice = decodeURIComponent(device);
-      deviceObj = JSON.parse(decodedDevice);
-    } catch (e) {
+    const parsed = parseDeviceParam(device);
+    if (parsed?._parseError) {
       logWithCategory('error', LOG_CATEGORIES.API, 'Invalid device JSON in GET request', {
-        error: e.message,
+        error: parsed._parseError,
         deviceParam: device
       });
+
       return res.status(400).json({
-        error: 'Invalid device JSON format',
-        suggestion: 'Consider using POST method for complex device updates'
+        error: 'device 参数格式不合法',
+        detail: parsed._parseError,
+        suggestion: '请使用标准 JSON 格式，或使用 POST 方法提交复杂结构'
       });
     }
+
+    deviceObj = parsed;
   }
 
   logWithCategory('info', LOG_CATEGORIES.API, 'Status GET request', {
@@ -160,21 +180,9 @@ router.get('/', authenticateSetSecret, (req, res) => {
     device: deviceObj
   });
 
-  if (status !== undefined) {
-    const parsedStatus = Number(status);
-    if (!Number.isNaN(parsedStatus)) {
-      currentStatus.status = parsedStatus;
-    }
-  }
+  const parsedStatus = Number(status);
+  applyStatusAndDeviceUpdate(!Number.isNaN(parsedStatus) ? parsedStatus : undefined, deviceObj, time);
 
-  if (deviceObj) {
-    updateDeviceStatus(deviceObj, time);
-  }
-
-  currentStatus.last_updated = new Date().toISOString();
-  sendSSEMessage(sseClients, 'update', currentStatus);
-
-  // 🔗 在响应中包含 POST 路由参考信息
   const response = {
     ...currentStatus,
     _meta: {
