@@ -28,18 +28,21 @@ router.get('/', authenticateGetSecret, (req, res) => {
   });
 
   res.flushHeaders?.();
+  currentStatus.observer = sseClients.size + 1;
 
   logWithCategory('info', LOG_CATEGORIES.SSE, 'New SSE connection', {
+    observer: currentStatus.observer,
     origin: origin || 'local/unknown',
     ip: req.ip,
     totalConnections: sseClients.size + 1
   });
-  
+
   sseClients.add(res);
   sendSSEMessage(new Set([res]), 'update', currentStatus);
 
   req.on('close', () => {
     logWithCategory('info', LOG_CATEGORIES.SSE, 'SSE connection closed', {
+      observer: currentStatus.observer,
       origin: origin || 'local/unknown',
       totalConnections: sseClients.size - 1
     });
@@ -47,12 +50,25 @@ router.get('/', authenticateGetSecret, (req, res) => {
   });
 
   req.on('error', (err) => {
-    logWithCategory('error', LOG_CATEGORIES.SSE, 'SSE connection error', {
-      error: err.message,
-      origin: origin || 'local/unknown'
-    });
+    const ignoredErrors = ['aborted', 'ECONNRESET'];
+
+    if (ignoredErrors.includes(err.code) || err.message === 'aborted') {
+      logWithCategory('debug', LOG_CATEGORIES.SSE, 'SSE connection closed (client aborted)', {
+        observer: currentStatus.observer,
+        origin: origin || 'local/unknown'
+      });
+    } else {
+      logWithCategory('error', LOG_CATEGORIES.SSE, 'SSE connection error', {
+        observer: currentStatus.observer,
+        error: err.message,
+        origin: origin || 'local/unknown'
+      });
+    }
+
     sseClients.delete(res);
+    currentStatus.observer = sseClients.size;
   });
+
 });
 
 module.exports = router;

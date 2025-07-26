@@ -11,9 +11,12 @@ let currentStatus = {
     //   "using": true,
     //   "app_name": "微信",
     //   "show_name": "pc",
+    //   "media":false,
+    //   "media_content": null,
     //   "time": "2025-07-17T10:00:00.000Z"
     // }
   },
+  observer: 0,
   last_updated: new Date().toISOString()
 };
 

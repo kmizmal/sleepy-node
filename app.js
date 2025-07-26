@@ -54,7 +54,7 @@ app.use('/api/', middleware.limiter);
 app.use(express.json());
 
 app.get('/', (req, res) => {
-  res.redirect('https://github.com/kmizmal/sleepy-node');
+  res.send('Ciallo～(∠・ω< )⌒★');
 });
 
 // 路由注册
@@ -63,6 +63,9 @@ app.use('/device/set',statusRouter);// 兼容旧的 /device/set 路径
 app.use('/auth', authRouter);
 app.use('/events', eventsRouter);
 app.use('/health', healthRouter);
+
+
+app.set('trust proxy', true);
 
 // 错误日志
 app.use(expressWinston.errorLogger({

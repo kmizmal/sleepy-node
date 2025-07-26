@@ -31,6 +31,8 @@ function updateDeviceStatus(deviceObj, time) {
       ...existing,
       ...deviceData,
       time: getCurrentOrPassedTime(time),
+      media: deviceData.media,
+      media_content: deviceData.media_content,
       show_name: deviceData.show_name || existing.show_name || deviceKey || 'Unknown'
     };
   }
@@ -52,18 +54,20 @@ function applyStatusAndDeviceUpdate(status, deviceObj, time) {
 // ========= POST 路由 =========
 
 router.post('/', strictLimiter, authenticateSetSecret, (req, res) => {
-  let { status, device, time, id, show_name, using, app_name } = req.body;
+  let { status, device, time, id, show_name, using, app_name,media,media_content } = req.body;
   const start = Date.now();
   const ip = req.ip;
 
   const isLegacy = status === undefined && device === undefined && id && app_name && typeof using === 'boolean';
   if (isLegacy) {
-    status = using ? 0 : 1;
+    status = status || using ? 0 : 1;
     device = {
       [id]: {
         using,
         app_name,
-        show_name: show_name || id
+        show_name: show_name || id,
+        media: media || media_content?true:false,
+        media_content
       }
     };
   }
